@@ -11,6 +11,11 @@
 
 #define PIPE_PARANOIA /* for now */
 
+/*
+ * NOTE: STEP return NOT-COPIED bytes
+ * "output n" == min(n, __p->iov_len - skip) - not_copied
+ * i.e., returned n is COPIED bytes
+ **/
 #define iterate_iovec(i, n, __v, __p, skip, STEP) {	\
 	size_t left;					\
 	size_t wanted = n;				\
