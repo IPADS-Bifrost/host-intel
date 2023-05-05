@@ -6480,10 +6480,32 @@ void vmx_update_host_rsp(struct vcpu_vmx *vmx, unsigned long host_rsp)
 
 bool __vmx_vcpu_run(struct vcpu_vmx *vmx, unsigned long *regs, bool launched);
 
+unsigned long before_cycles = 5000;
+unsigned long after_cycles = 5000;
+EXPORT_SYMBOL(before_cycles);
+EXPORT_SYMBOL(after_cycles);
+#define VCPU_NR (48)
+atomic64_t vmexit_cnt[100];
+atomic64_t vmexit_cycle[100];
+atomic_t vmexit_first[VCPU_NR];
+static atomic_t vmexit_reason[VCPU_NR];
+uint64_t breakdown_st;
+EXPORT_SYMBOL(vmexit_cycle);
+EXPORT_SYMBOL(vmexit_cnt);
+EXPORT_SYMBOL(breakdown_st);
+EXPORT_SYMBOL(vmexit_first);
+bool vmexit_record_en;
+EXPORT_SYMBOL(vmexit_record_en);
+static uint64_t st = 0, en = 0;
 static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long cr3, cr4;
+    unsigned long a, b;
+    unsigned long cir_cnt = 0;
+    bool is_first = false;
+    bool e = vmexit_record_en;
+    int vcpu_id = vcpu->vcpu_id;
 
 	/* Record the guest's net vcpu time for enforced NMI injections. */
 	if (unlikely(!enable_vnmi &&
@@ -6561,8 +6583,35 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.cr2 != read_cr2())
 		write_cr2(vcpu->arch.cr2);
 
+    b = rdtsc_ordered();
+    do {
+        a = rdtsc_ordered();
+        cir_cnt ++ ;
+    } while (a - b < before_cycles);
+    if (e) {
+        u32 reason;
+        reason = vmcs_read32(VM_EXIT_REASON);
+        is_first = atomic_read(&vmexit_first[vcpu_id]);
+        en = rdtsc_ordered();
+        if (reason >= 100) reason = 99;
+
+        atomic_set(&vmexit_reason[vcpu_id], reason);
+        if (!is_first) {
+            atomic64_inc(&vmexit_cnt[reason]);
+            atomic64_add(en - st, &vmexit_cycle[reason]);
+        } else {
+            atomic_set(&vmexit_first[vcpu_id], 0);
+        }
+    }
 	vmx->fail = __vmx_vcpu_run(vmx, (unsigned long *)&vcpu->arch.regs,
 				   vmx->loaded_vmcs->launched);
+    if (e) {
+        st = rdtsc_ordered();
+    }
+    b = rdtsc_ordered();
+    do {
+        a = rdtsc_ordered();
+    } while (a - b < after_cycles);
 
 	vcpu->arch.cr2 = read_cr2();
 
